@@ -2,11 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Zap, Plus, X, Trophy, ChevronDown, ChevronUp, Loader2, CheckCircle2,
-  AlertCircle, Link2, RefreshCw, Copy, Sparkles,
+  AlertCircle, Link2, RefreshCw, Copy, Sparkles, FileText,
 } from "lucide-react";
 import { toast } from "sonner";
-import { FORMATION_OPTIONS } from "@/lib/formations";
-import { FormationPitch } from "@/components/prediction/FormationPitch";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -25,14 +24,52 @@ type LinkStatus = "idle" | "loading" | "done" | "error";
 interface NewsLink { id: string; url: string; status: LinkStatus; summary?: string }
 interface CustomBet { id: string; name: string; value: string }
 
-const HANDICAP_VALUES = ["0", "0.25", "0.5", "0.75", "1", "1.25", "1.5", "-0.25", "-0.5", "-0.75", "-1"];
-const GOAL_LINES = ["1.5", "2", "2.5", "3", "3.5", "4", "4.5"];
-const CORNER_LINES = ["7.5", "8", "8.5", "9", "9.5", "10", "10.5", "11"];
+interface AnalysisHistory {
+  id: string;
+  timestamp: number;
+  league: string;
+  matchType: MatchType;
+  homeTeam: string;
+  awayTeam: string;
+  result: string;
+  agentLogs: Record<string, string> | null;
+}
+
+const isValidBetValue = (value: string): boolean => {
+  const num = parseFloat(value);
+  if (isNaN(num)) return false;
+  const decimal = num % 1;
+  // Chấp nhận số nguyên hoặc số có phần thập phân là 0, 0.25, 0.5, 0.75
+  return decimal === 0 || decimal === 0.25 || decimal === 0.5 || decimal === 0.75;
+};
 const MATCH_TYPES: MatchType[] = ["Giao hữu", "Vòng bảng", "Vòng loại trực tiếp", "Tứ kết", "Bán kết", "Chung kết"];
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 function Index() {
+  // History
+  const [history, setHistory] = useState<AnalysisHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("analysis_history");
+    if (saved) {
+      try {
+        setHistory(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to load history", e);
+      }
+    }
+  }, []);
+
+  // Save to localStorage when history changes
+  useEffect(() => {
+    if (history.length > 0) {
+      localStorage.setItem("analysis_history", JSON.stringify(history));
+    }
+  }, [history]);
+
   // Step 1
   const [league, setLeague] = useState("World cup 2026");
   const [matchType, setMatchType] = useState<MatchType>("Vòng bảng");
@@ -65,6 +102,7 @@ function Index() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [agentLogs, setAgentLogs] = useState<Record<string, string> | null>(null);
   const [showMissingFormationPopup, setShowMissingFormationPopup] = useState(false);
 
   const addLink = () => { if (links.length < 10) setLinks([...links, { id: uid(), url: "", status: "idle" }]); };
@@ -125,6 +163,21 @@ function Index() {
               finalResult = finalResult.replace(/\[THIEU_DOI_HINH\]/g, "").trim();
             }
             setResult(finalResult);
+            setAgentLogs(statusData.agent_logs || null);
+            
+            // Save to history
+            const newHistory: AnalysisHistory = {
+              id: uid(),
+              timestamp: Date.now(),
+              league,
+              matchType,
+              homeTeam,
+              awayTeam,
+              result: finalResult,
+              agentLogs: statusData.agent_logs || null
+            };
+            setHistory(prev => [newHistory, ...prev].slice(0, 20)); // Keep last 20
+            
             setLoading(false);
             window.setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 100);
           } else if (statusData.status === "failed") {
@@ -145,12 +198,29 @@ function Index() {
 
   const reset = () => {
     setResult(null);
+    setAgentLogs(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const loadFromHistory = (item: AnalysisHistory) => {
+    setResult(item.result);
+    setAgentLogs(item.agentLogs);
+    setShowHistory(false);
+    window.setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 100);
+  };
+
+  const deleteFromHistory = (id: string) => {
+    setHistory(prev => prev.filter(h => h.id !== id));
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem("analysis_history");
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100" style={{ fontFamily: "Inter, system-ui, -apple-system, sans-serif" }}>
-      <Header />
+      <Header historyCount={history.length} onShowHistory={() => setShowHistory(true)} />
       <main className="mx-auto max-w-4xl px-4 py-8 space-y-6">
         <StepIndicator current={result ? 5 : loading ? 4 : 1} />
 
@@ -195,9 +265,16 @@ function Index() {
                   </Select>
                 </Field>
                 <Field label="Mức chấp">
-                  <Select value={handicapValue} onChange={e => setHandicapValue(e.target.value)}>
-                    {HANDICAP_VALUES.map(v => <option key={v} value={v}>{v}</option>)}
-                  </Select>
+                  <Input 
+                    type="number" 
+                    step="0.25" 
+                    value={handicapValue} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (isValidBetValue(val)) setHandicapValue(val);
+                    }}
+                    placeholder="VD: 0.25, 0.5, 1, 1.5"
+                  />
                 </Field>
                 <Field label="Odds chấp trên"><Input type="number" step="0.01" value={handicapOver} onChange={e => setHandicapOver(e.target.value)} /></Field>
                 <Field label="Odds chấp dưới"><Input type="number" step="0.01" value={handicapUnder} onChange={e => setHandicapUnder(e.target.value)} /></Field>
@@ -207,9 +284,16 @@ function Index() {
             <BetSection title="MÃ ĐẦU TƯ TRÊN DƯỚI BÀN (Over/Under Goals)" open={openSections.g} onToggle={() => setOpenSections(s => ({ ...s, g: !s.g }))}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <Field label="Mức tổng bàn">
-                  <Select value={goalLine} onChange={e => setGoalLine(e.target.value)}>
-                    {GOAL_LINES.map(v => <option key={v} value={v}>{v}</option>)}
-                  </Select>
+                  <Input 
+                    type="number" 
+                    step="0.25" 
+                    value={goalLine} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (isValidBetValue(val)) setGoalLine(val);
+                    }}
+                    placeholder="VD: 2, 2.5, 3, 3.5"
+                  />
                 </Field>
                 <Field label="Odds Trên"><Input type="number" step="0.01" value={goalOver} onChange={e => setGoalOver(e.target.value)} /></Field>
                 <Field label="Odds Dưới"><Input type="number" step="0.01" value={goalUnder} onChange={e => setGoalUnder(e.target.value)} /></Field>
@@ -219,9 +303,16 @@ function Index() {
             <BetSection title="MÃ ĐẦU TƯ PHẠT GÓC (Over/Under Corners)" open={openSections.c} onToggle={() => setOpenSections(s => ({ ...s, c: !s.c }))}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <Field label="Mức tổng góc">
-                  <Select value={cornerLine} onChange={e => setCornerLine(e.target.value)}>
-                    {CORNER_LINES.map(v => <option key={v} value={v}>{v}</option>)}
-                  </Select>
+                  <Input 
+                    type="number" 
+                    step="0.25" 
+                    value={cornerLine} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (isValidBetValue(val)) setCornerLine(val);
+                    }}
+                    placeholder="VD: 8, 8.5, 9, 9.5"
+                  />
                 </Field>
                 <Field label="Odds Trên"><Input type="number" step="0.01" value={cornerOver} onChange={e => setCornerOver(e.target.value)} /></Field>
                 <Field label="Odds Dưới"><Input type="number" step="0.01" value={cornerUnder} onChange={e => setCornerUnder(e.target.value)} /></Field>
@@ -305,7 +396,7 @@ function Index() {
         </button>
 
         {loading && <LoadingCard />}
-        {result && <ResultsView result={result} homeTeam={homeTeam} awayTeam={awayTeam} onReset={reset} />}
+        {result && <ResultsView result={result} agentLogs={agentLogs} homeTeam={homeTeam} awayTeam={awayTeam} onReset={reset} />}
 
         {showMissingFormationPopup && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -341,6 +432,74 @@ function Index() {
           </div>
         )}
 
+        {/* History Modal */}
+        {showHistory && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-white">Lịch sử phân tích</h3>
+                <button
+                  onClick={() => setShowHistory(false)}
+                  className="h-8 w-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition flex items-center justify-center"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {history.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">Chưa có lịch sử phân tích</div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-xs text-slate-400">Lưu tối đa 20 phân tích gần nhất</p>
+                    <button
+                      onClick={clearHistory}
+                      className="px-3 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition"
+                    >
+                      Xóa tất cả
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto space-y-2">
+                    {history.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-xl bg-slate-950 border border-slate-800 p-4 hover:border-slate-700 transition"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm font-bold text-white">{item.homeTeam} vs {item.awayTeam}</span>
+                              <span className="text-xs text-slate-500">•</span>
+                              <span className="text-xs text-slate-400">{item.league}</span>
+                            </div>
+                            <div className="text-xs text-slate-500 mb-3">
+                              {new Date(item.timestamp).toLocaleString('vi-VN')} • {item.matchType}
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => loadFromHistory(item)}
+                                className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition"
+                              >
+                                Xem lại
+                              </button>
+                              <button
+                                onClick={() => deleteFromHistory(item.id)}
+                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs font-medium transition"
+                              >
+                                Xóa
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         <p className="text-center text-xs text-slate-600 py-8">Siêu Máy Tính Dự Đoán Bóng Đá • Được hỗ trợ bởi AI</p>
       </main>
     </div>
@@ -349,17 +508,28 @@ function Index() {
 
 /* ---------- helpers / sub-components ---------- */
 
-function Header() {
+function Header({ historyCount, onShowHistory }: { historyCount: number; onShowHistory: () => void }) {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
-      <div className="mx-auto max-w-4xl px-4 py-3.5 flex items-center gap-3">
-        <div className="h-9 w-9 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg, #3b82f6, #06b6d4)" }}>
-          <Trophy className="h-5 w-5 text-white" />
+      <div className="mx-auto max-w-4xl px-4 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg, #3b82f6, #06b6d4)" }}>
+            <Trophy className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-base md:text-lg font-bold tracking-tight text-white leading-none">Siêu Máy Tính Dự Đoán Bóng Đá</h1>
+            <p className="text-[11px] text-slate-400 mt-0.5">Phân tích trận đấu bằng AI</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-base md:text-lg font-bold tracking-tight text-white leading-none">Siêu Máy Tính Dự Đoán Bóng Đá</h1>
-          <p className="text-[11px] text-slate-400 mt-0.5">Phân tích trận đấu bằng AI</p>
-        </div>
+        {historyCount > 0 && (
+          <button
+            onClick={onShowHistory}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition flex items-center gap-2"
+          >
+            <FileText className="h-4 w-4" />
+            Lịch sử ({historyCount})
+          </button>
+        )}
       </div>
     </header>
   );
@@ -526,9 +696,20 @@ function LoadingCard() {
 
 /* ---------- Result view ---------- */
 
-function ResultsView({ result, homeTeam, awayTeam, onReset }: { result: string; homeTeam: string; awayTeam: string; onReset: () => void }) {
+function ResultsView({ result, agentLogs, homeTeam, awayTeam, onReset }: { result: string; agentLogs: Record<string, string> | null; homeTeam: string; awayTeam: string; onReset: () => void }) {
+  const [activeTab, setActiveTab] = useState<"result" | "logs">("result");
+  const [activeAgentTab, setActiveAgentTab] = useState<string>("news_collector");
+
   const copy = () => {
     navigator.clipboard?.writeText(result);
+  };
+
+  const agentLabels: Record<string, string> = {
+    news_collector: "1. Thu thập tin tức",
+    formation_analyst: "2. Phân tích chiến thuật",
+    context_analyst: "3. Phân tích bối cảnh",
+    signal_analyst: "4. Phân tích mã đầu tư",
+    master_analyst: "5. Tổng hợp cuối cùng"
   };
 
   // Parse confidence levels from result
@@ -591,51 +772,105 @@ function ResultsView({ result, homeTeam, awayTeam, onReset }: { result: string; 
         <h2 className="mt-1 text-2xl md:text-3xl font-bold text-white">{homeTeam} <span className="text-slate-500">vs</span> {awayTeam}</h2>
       </div>
 
-      {/* Prediction Summary Card */}
-      {confidenceData && confidenceData.length > 0 && (
+      {/* Tab Switcher */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setActiveTab("result")}
+          className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition ${activeTab === "result" ? "bg-blue-500 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+        >
+          Kết quả
+        </button>
+        {agentLogs && (
+          <button
+            onClick={() => setActiveTab("logs")}
+            className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${activeTab === "logs" ? "bg-blue-500 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+          >
+            <FileText className="h-4 w-4" />
+            Chi tiết Agent
+          </button>
+        )}
+      </div>
+
+      {/* Result Tab */}
+      {activeTab === "result" && (
+        <>
+          {/* Prediction Summary Card */}
+          {confidenceData && confidenceData.length > 0 && (
+            <GlassCard>
+              <div className="mb-4">
+                <h3 className="text-lg font-bold text-white mb-1">Tóm Tắt Dự Đoán</h3>
+                <p className="text-xs text-slate-400">Lựa chọn mã đầu tư cho từng loại kèo</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {confidenceData.map((bet, i) => (
+                  <div key={i} className="rounded-xl border p-4 bg-blue-500/10 text-blue-100 border-blue-500/30">
+                    <div className="text-xs font-medium uppercase tracking-wider mb-2 text-blue-400/80">{bet.name}</div>
+                    {bet.prediction && (
+                      <div className="text-sm font-bold leading-relaxed">{bet.prediction}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          )}
+
+          <GlassCard>
+            <div className="prose prose-invert max-w-none prose-sm text-slate-300">
+              {result.split('\n').map((line, i) => {
+                if (line.startsWith('## ')) return <h3 key={i} className="text-xl font-bold text-blue-400 mt-6 mb-3">{line.replace('## ', '')}</h3>;
+                if (line.startsWith('# ')) return <h2 key={i} className="text-2xl font-bold text-blue-500 mt-8 mb-4">{line.replace('# ', '')}</h2>;
+                if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-bold text-white my-2">{line.replace(/\*\*/g, '')}</p>;
+                if (line.startsWith('- ')) return <li key={i} className="ml-4 text-slate-300 mb-1">{line.replace('- ', '')}</li>;
+                if (line.trim() === '') return <br key={i} />;
+                return <p key={i} className="leading-relaxed mb-2">{line}</p>;
+              })}
+            </div>
+          </GlassCard>
+
+          <p className="text-xs text-slate-500 text-center leading-relaxed px-4 mt-6">
+            Lưu ý: Đây là phân tích tham khảo từ AI, không đảm bảo chính xác 100%. Vui lòng cân nhắc và chơi có trách nhiệm.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+            <button onClick={copy} className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium border border-slate-700 transition">
+              <Copy className="h-4 w-4" /> Sao chép kết quả
+            </button>
+            <button onClick={onReset} className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition">
+              <RefreshCw className="h-4 w-4" /> Phân tích trận mới
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Agent Logs Tab */}
+      {activeTab === "logs" && agentLogs && (
         <GlassCard>
           <div className="mb-4">
-            <h3 className="text-lg font-bold text-white mb-1">Tóm Tắt Dự Đoán</h3>
-            <p className="text-xs text-slate-400">Lựa chọn mã đầu tư cho từng loại kèo</p>
+            <h3 className="text-lg font-bold text-white mb-1">Chi tiết phân tích từng Agent</h3>
+            <p className="text-xs text-slate-400">Xem log chi tiết của từng AI Agent trong quá trình phân tích</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {confidenceData.map((bet, i) => (
-              <div key={i} className="rounded-xl border p-4 bg-blue-500/10 text-blue-100 border-blue-500/30">
-                <div className="text-xs font-medium uppercase tracking-wider mb-2 text-blue-400/80">{bet.name}</div>
-                {bet.prediction && (
-                  <div className="text-sm font-bold leading-relaxed">{bet.prediction}</div>
-                )}
-              </div>
+
+          {/* Agent Tab Switcher */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {Object.keys(agentLogs).map(key => (
+              <button
+                key={key}
+                onClick={() => setActiveAgentTab(key)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${activeAgentTab === key ? "bg-blue-500 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
+              >
+                {agentLabels[key] || key}
+              </button>
             ))}
+          </div>
+
+          {/* Agent Log Content */}
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4">
+            <div className="prose prose-invert max-w-none prose-xs text-slate-300 whitespace-pre-wrap font-mono">
+              {agentLogs[activeAgentTab] || "Không có dữ liệu"}
+            </div>
           </div>
         </GlassCard>
       )}
-
-      <GlassCard>
-        <div className="prose prose-invert max-w-none prose-sm text-slate-300">
-          {result.split('\n').map((line, i) => {
-            if (line.startsWith('## ')) return <h3 key={i} className="text-xl font-bold text-blue-400 mt-6 mb-3">{line.replace('## ', '')}</h3>;
-            if (line.startsWith('# ')) return <h2 key={i} className="text-2xl font-bold text-blue-500 mt-8 mb-4">{line.replace('# ', '')}</h2>;
-            if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-bold text-white my-2">{line.replace(/\*\*/g, '')}</p>;
-            if (line.startsWith('- ')) return <li key={i} className="ml-4 text-slate-300 mb-1">{line.replace('- ', '')}</li>;
-            if (line.trim() === '') return <br key={i} />;
-            return <p key={i} className="leading-relaxed mb-2">{line}</p>;
-          })}
-        </div>
-      </GlassCard>
-
-      <p className="text-xs text-slate-500 text-center leading-relaxed px-4 mt-6">
-        Lưu ý: Đây là phân tích tham khảo từ AI, không đảm bảo chính xác 100%. Vui lòng cân nhắc và chơi có trách nhiệm.
-      </p>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-        <button onClick={copy} className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium border border-slate-700 transition">
-          <Copy className="h-4 w-4" /> Sao chép kết quả
-        </button>
-        <button onClick={onReset} className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition">
-          <RefreshCw className="h-4 w-4" /> Phân tích trận mới
-        </button>
-      </div>
     </div>
   );
 }
