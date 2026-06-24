@@ -20,7 +20,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type MatchType = "Giao hữu" | "Vòng bảng" | "Tứ kết" | "Bán kết" | "Chung kết";
+type MatchType = "Giao hữu" | "Vòng bảng" | "Vòng loại trực tiếp" | "Tứ kết" | "Bán kết" | "Chung kết";
 type LinkStatus = "idle" | "loading" | "done" | "error";
 interface NewsLink { id: string; url: string; status: LinkStatus; summary?: string }
 interface CustomBet { id: string; name: string; value: string }
@@ -28,7 +28,7 @@ interface CustomBet { id: string; name: string; value: string }
 const HANDICAP_VALUES = ["0", "0.25", "0.5", "0.75", "1", "1.25", "1.5", "-0.25", "-0.5", "-0.75", "-1"];
 const GOAL_LINES = ["1.5", "2", "2.5", "3", "3.5", "4", "4.5"];
 const CORNER_LINES = ["7.5", "8", "8.5", "9", "9.5", "10", "10.5", "11"];
-const MATCH_TYPES: MatchType[] = ["Giao hữu", "Vòng bảng", "Tứ kết", "Bán kết", "Chung kết"];
+const MATCH_TYPES: MatchType[] = ["Giao hữu", "Vòng bảng", "Vòng loại trực tiếp", "Tứ kết", "Bán kết", "Chung kết"];
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
